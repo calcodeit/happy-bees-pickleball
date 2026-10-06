@@ -207,6 +207,12 @@ tr.top3 td:nth-child(2) { font-weight: 700; }
 th button { all: unset; cursor: pointer; }
 th button[aria-pressed="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
 .pos { color: var(--win); } .neg { color: var(--danger); }
+.grade { margin-top: 14px; }
+.grade + .grade { padding-top: 14px; border-top: 2px solid var(--line); }
+.grade-h { margin: 0; display: flex; align-items: center; gap: 8px; font-family: var(--display); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: 18px; }
+.gbadge { width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 18px; }
+.gbadge.a { background: var(--ball); color: var(--ball-ink); }
+.gbadge.b { background: var(--court); color: #fff; }
 .log { display: grid; }
 .lrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); align-items: center; }
 .lrow:first-child { border-top: 0; }
@@ -343,7 +349,7 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
 
   function blank() {
     return { v: 1, updatedAt: 0, by: "", demo: false, startedAt: Date.now(),
-      settings: { courts: 6, mode: "mix", scores: false, autoFill: true },
+      settings: { courts: 6, mode: "mix", scores: false, autoFill: true, aCut: 70 },
       roster: [], courts: [null, null, null, null, null, null], matches: [] };
   }
   function normalize(s) {
@@ -365,11 +371,14 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
   let view = lsGet(LS_VIEW) || "courts";
   let sheet = null;
   let standSort = "wins";
+  let standView = lsGet("pkl-rotation-standview") || "tonight";
   let filterText = "";
   let readOnly = false;
   let syncMode = "local";
 
   // ---------- derived ----------
+  const MIN_GAMES_FOR_A = 3;
+  const gradeOf = (wins, games) => games >= MIN_GAMES_FOR_A && wins / games * 100 >= state.settings.aCut ? "A" : "B";
   const nameOf = id => (state.roster.find(p => p.id === id) || {}).name || "Player";
   const teamName = ids => ids.map(nameOf).join(" & ");
   function onCourtMap() {
@@ -711,32 +720,73 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
       <div class="setting"><div class="spread"><b>Start next game automatically</b><button class="switch" role="switch" data-act="autoFill" aria-checked="${st.autoFill}" aria-label="Start next game automatically"></button></div>
         <p class="hint">When a result is entered, the next four from the bench go straight onto that court.</p></div>
       <div class="setting"><div class="spread"><b>Record scores</b><button class="switch" role="switch" data-act="scores" aria-checked="${st.scores}" aria-label="Record scores"></button></div>
-        <p class="hint">Off: just tap the winners. On: enter the score (e.g. 11–7) for a points +/− column.</p></div>`;
+        <p class="hint">Off: just tap the winners. On: enter the score (e.g. 11–7) for a points +/− column.</p></div>
+      <div class="setting"><div class="spread"><b>A grade cutoff</b>
+        <div class="stepper"><button class="btn sm" data-act="aCut" data-d="-5" aria-label="Lower cutoff">−</button><output>${st.aCut}%</output><button class="btn sm" data-act="aCut" data-d="5" aria-label="Raise cutoff">+</button></div></div>
+        <p class="hint">Players who win at least this share of their games (after ${MIN_GAMES_FOR_A} or more games) go in A grade on the Results tab. Everyone else is B grade.</p></div>`;
   }
-  function standingsRows() {
-    const S = computeStats();
-    const rows = state.roster.filter(p => S.get(p.id).games > 0 || p.in).map(p => {
-      const s = S.get(p.id);
-      return { p, ...s, pct: s.games ? s.wins / s.games : 0, pd: s.pf - s.pa };
-    });
+  const LADDER_NIGHTS = 5;
+  function sortRows(rows) {
     const by = {
-      wins: (a, b) => b.wins - a.wins || b.pct - a.pct || b.pd - a.pd || a.p.name.localeCompare(b.p.name),
-      pct: (a, b) => b.pct - a.pct || b.wins - a.wins || a.p.name.localeCompare(b.p.name),
-      games: (a, b) => b.games - a.games || b.wins - a.wins || a.p.name.localeCompare(b.p.name),
-      pd: (a, b) => b.pd - a.pd || b.wins - a.wins || a.p.name.localeCompare(b.p.name),
-      name: (a, b) => a.p.name.localeCompare(b.p.name)
+      wins: (a, b) => b.wins - a.wins || b.pct - a.pct || b.pd - a.pd || a.name.localeCompare(b.name),
+      pct: (a, b) => b.pct - a.pct || b.wins - a.wins || a.name.localeCompare(b.name),
+      games: (a, b) => b.games - a.games || b.wins - a.wins || a.name.localeCompare(b.name),
+      pd: (a, b) => b.pd - a.pd || b.wins - a.wins || a.name.localeCompare(b.name),
+      nights: (a, b) => (b.nights || 0) - (a.nights || 0) || b.wins - a.wins || a.name.localeCompare(b.name),
+      name: (a, b) => a.name.localeCompare(b.name)
     };
     return rows.sort(by[standSort] || by.wins);
   }
+  function standingsRows() {
+    const S = computeStats();
+    return sortRows(state.roster.filter(p => S.get(p.id).games > 0 || p.in).map(p => {
+      const s = S.get(p.id);
+      return { name: p.name, wins: s.wins, losses: s.losses, games: s.games, pct: s.games ? s.wins / s.games : 0, pd: s.pf - s.pa, scored: s.scored };
+    }));
+  }
+  // The ladder adds up tonight (once games are played) plus the most recent saved sessions, 5 nights in total.
+  function ladderNights() {
+    const nights = [];
+    if (state.matches.length) nights.push({ startedAt: state.startedAt, tonight: true, players: snapshotSession().players });
+    history.slice().sort((a, b) => b.startedAt - a.startedAt).forEach(h => { if (nights.length < LADDER_NIGHTS) nights.push(h); });
+    return nights;
+  }
+  function ladderRows(nights) {
+    const m = new Map();
+    nights.forEach(n => n.players.forEach(p => {
+      if (!p.games) return;
+      const k = p.name.trim().toLowerCase();
+      const a = m.get(k) || { name: p.name, wins: 0, losses: 0, games: 0, nights: 0 };
+      a.wins += p.wins; a.losses += p.losses; a.games += p.games; a.nights++;
+      m.set(k, a);
+    }));
+    return sortRows([...m.values()].map(a => ({ ...a, pct: a.games ? a.wins / a.games : 0, pd: 0, scored: 0 })));
+  }
   function renderStandings() {
-    const rows = standingsRows();
-    const anyScores = state.matches.some(m => typeof m.sa === "number");
+    const ladder = standView === "ladder";
+    const nights = ladder ? ladderNights() : [];
+    const rows = ladder ? ladderRows(nights) : standingsRows();
+    const anyScores = !ladder && state.matches.some(m => typeof m.sa === "number");
     const sb = (k, label) => `<button data-act="sort" data-k="${k}" aria-pressed="${standSort === k}">${label}</button>`;
-    let h = `<div class="cols"><div class="card"><div class="spread"><h2 class="eyebrow">Standings</h2><span class="hint">Tap a heading to sort</span></div>`;
-    if (!rows.length) h += `<p class="hint" style="padding:12px 0">Results show up here as games finish.</p>`;
-    else h += `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>${sb("name", "Player")}</th><th>${sb("wins", "W")}</th><th>L</th><th>${sb("games", "GP")}</th><th>${sb("pct", "Win %")}</th>${anyScores ? `<th>${sb("pd", "+/−")}</th>` : ""}</tr></thead><tbody>
-      ${rows.map((r, i) => `<tr class="${i < 3 && standSort !== "name" && r.games ? "top3" : ""}"><td>${i + 1}</td><td>${esc(r.p.name)}</td><td>${r.wins}</td><td>${r.losses}</td><td>${r.games}</td><td>${r.games ? Math.round(r.pct * 100) + "%" : "–"}</td>${anyScores ? `<td class="${r.pd > 0 ? "pos" : r.pd < 0 ? "neg" : ""}">${r.scored ? (r.pd > 0 ? "+" : "") + r.pd : "–"}</td>` : ""}</tr>`).join("")}
+    const shortDate = t => new Date(t).toLocaleDateString([], { day: "numeric", month: "short" });
+    let h = `<div class="cols"><div class="card"><div class="spread"><h2 class="eyebrow">Standings</h2>
+      <div class="seg" role="group" aria-label="Standings period"><button data-act="standView" data-v="tonight" aria-pressed="${!ladder}">Tonight</button><button data-act="standView" data-v="ladder" aria-pressed="${ladder}">Last ${LADDER_NIGHTS} sessions</button></div></div>`;
+    if (ladder && nights.length) h += `<p class="hint" style="margin-top:10px">Adds up ${nights.length === 1 ? "1 session" : nights.length + " sessions"}: ${nights.map(n => n.tonight ? "tonight" : shortDate(n.startedAt)).join(", ")}. Players are matched by name.</p>`;
+    if (!rows.length) h += ladder
+      ? `<p class="hint" style="padding:12px 0">The ladder builds as you play. Tonight counts straight away, and each session you save in Wrap-up stays on the ladder for the next ${LADDER_NIGHTS} sessions.</p>`
+      : `<p class="hint" style="padding:12px 0">Results show up here as games finish.</p>`;
+    else {
+      const cut = state.settings.aCut;
+      const A = rows.filter(r => gradeOf(r.wins, r.games) === "A"), B = rows.filter(r => gradeOf(r.wins, r.games) === "B");
+      const table = list => `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>${sb("name", "Player")}</th><th>${sb("wins", "W")}</th><th>L</th><th>${sb("games", "GP")}</th><th>${sb("pct", "Win %")}</th>${anyScores ? `<th>${sb("pd", "+/−")}</th>` : ""}${ladder ? `<th>${sb("nights", "Nights")}</th>` : ""}</tr></thead><tbody>
+      ${list.map((r, i) => `<tr class="${i < 3 && standSort !== "name" && r.games ? "top3" : ""}"><td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.wins}</td><td>${r.losses}</td><td>${r.games}</td><td>${r.games ? Math.round(r.pct * 100) + "%" : "–"}</td>${anyScores ? `<td class="${r.pd > 0 ? "pos" : r.pd < 0 ? "neg" : ""}">${r.scored ? (r.pd > 0 ? "+" : "") + r.pd : "–"}</td>` : ""}${ladder ? `<td>${r.nights}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>`;
+      h += `<div class="grade"><div class="spread"><h3 class="grade-h"><span class="gbadge a" aria-hidden="true">A</span>A grade · ${A.length}</h3><span class="hint">${cut}%+ win rate, ${MIN_GAMES_FOR_A}+ games</span></div>
+        ${A.length ? table(A) : `<p class="hint" style="padding:8px 0">Nobody yet. Players need ${MIN_GAMES_FOR_A}+ games at ${cut}% or better.</p>`}</div>
+        <div class="grade"><div class="spread"><h3 class="grade-h"><span class="gbadge b" aria-hidden="true">B</span>B grade · ${B.length}</h3><span class="hint">Everyone else</span></div>
+        ${B.length ? table(B) : `<p class="hint" style="padding:8px 0">Everyone is in A grade.</p>`}</div>
+        <p class="hint" style="margin-top:10px">Tap a column heading to sort.</p>`;
+    }
     h += `</div><div class="card"><div class="spread"><h2 class="eyebrow">Match log · ${state.matches.length}</h2></div><div class="log" style="margin-top:6px">`;
     const ms = state.matches.slice().reverse();
     h += ms.map(m => {
@@ -750,8 +800,19 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
     $("#v-standings").innerHTML = h;
   }
   function summaryText(h) {
-    const lines = [`Happy Bees Pickleball · ${fmtDate(h.startedAt)}`, `${h.players.length} players · ${h.matches.length} games`, "", "Standings"];
-    h.players.forEach((p, i) => lines.push(`${i + 1}. ${p.name} — ${p.wins}W ${p.losses}L${p.pd != null ? ` (${p.pd > 0 ? "+" : ""}${p.pd})` : ""}`));
+    const lines = [`Happy Bees Pickleball · ${fmtDate(h.startedAt)}`, `${h.players.length} players · ${h.matches.length} games`];
+    const line = (p, i) => `${i + 1}. ${p.name} — ${p.wins}W ${p.losses}L${p.pd != null ? ` (${p.pd > 0 ? "+" : ""}${p.pd})` : ""}`;
+    if (h.players.some(p => p.grade)) {
+      ["A", "B"].forEach(g => {
+        const ps = h.players.filter(p => p.grade === g);
+        if (!ps.length) return;
+        lines.push("", g === "A" ? `A grade (${h.aCut || 70}%+ win rate)` : "B grade");
+        ps.forEach((p, i) => lines.push(line(p, i)));
+      });
+    } else {
+      lines.push("", "Standings");
+      h.players.forEach((p, i) => lines.push(line(p, i)));
+    }
     if (h.matches.length) {
       lines.push("", "Games");
       h.matches.forEach(m => lines.push(`Court ${m.court} · ${m.winners} def. ${m.losers}${m.score ? ` ${m.score}` : ""}`));
@@ -763,10 +824,10 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
     const anyScores = state.matches.some(m => typeof m.sa === "number");
     const ids = new Set(); state.matches.forEach(m => [...m.a, ...m.b].forEach(id => ids.add(id)));
     state.roster.forEach(p => { if (p.in) ids.add(p.id); });
-    const players = [...ids].map(id => { const s = S.get(id) || { wins: 0, losses: 0, games: 0, pf: 0, pa: 0, scored: 0 }; return { name: nameOf(id), wins: s.wins, losses: s.losses, games: s.games, pd: anyScores && s.scored ? s.pf - s.pa : null }; })
-      .sort((a, b) => b.wins - a.wins || (a.games ? b.wins / b.games : 0) - (b.games ? a.wins / a.games : 0) || a.name.localeCompare(b.name));
+    const players = [...ids].map(id => { const s = S.get(id) || { wins: 0, losses: 0, games: 0, pf: 0, pa: 0, scored: 0 }; return { name: nameOf(id), wins: s.wins, losses: s.losses, games: s.games, grade: gradeOf(s.wins, s.games), pd: anyScores && s.scored ? s.pf - s.pa : null }; })
+      .sort((a, b) => b.wins - a.wins || (b.games ? b.wins / b.games : 0) - (a.games ? a.wins / a.games : 0) || a.name.localeCompare(b.name));
     const matches = state.matches.map(m => ({ court: m.court, winners: teamName(m.w === "a" ? m.a : m.b), losers: teamName(m.w === "a" ? m.b : m.a), score: typeof m.sa === "number" ? (m.w === "a" ? `${m.sa}–${m.sb}` : `${m.sb}–${m.sa}`) : "", endedAt: m.endedAt }));
-    return { id: "s" + uid(), startedAt: state.startedAt, endedAt: Date.now(), players, matches };
+    return { id: "s" + uid(), startedAt: state.startedAt, endedAt: Date.now(), aCut: state.settings.aCut, players, matches };
   }
   function renderWrap() {
     const cur = snapshotSession();
@@ -940,7 +1001,9 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
       case "mode": commit(s => { s.settings.mode = t.dataset.m; }); break;
       case "autoFill": commit(s => { s.settings.autoFill = !s.settings.autoFill; }); break;
       case "scores": commit(s => { s.settings.scores = !s.settings.scores; }); break;
+      case "aCut": commit(s => { s.settings.aCut = Math.max(50, Math.min(95, s.settings.aCut + +t.dataset.d)); }); break;
       case "sort": standSort = t.dataset.k; renderStandings(); break;
+      case "standView": standView = t.dataset.v; lsSet("pkl-rotation-standview", standView); renderStandings(); break;
       case "delMatchAsk": {
         const m = state.matches.find(x => x.id === id); if (!m) break;
         confirmSheet("Delete this result?", `Court ${m.court}: ${teamName(m.w === "a" ? m.a : m.b)} def. ${teamName(m.w === "a" ? m.b : m.a)}. Wins and games played update to match.`, "Delete result", () => commit(s => { s.matches = s.matches.filter(x => x.id !== id); }));
