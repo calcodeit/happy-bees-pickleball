@@ -213,6 +213,15 @@ th button[aria-pressed="true"] { color: var(--ink); text-decoration: underline; 
 .gbadge { width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 18px; }
 .gbadge.a { background: var(--ball); color: var(--ball-ink); }
 .gbadge.b { background: var(--court); color: #fff; }
+.gtag { width: 30px; height: 30px; border-radius: 8px; border: 0; font-family: var(--display); font-weight: 700; font-size: 17px; cursor: pointer; padding: 0; flex: none; }
+.gtag.a { background: var(--ball); color: var(--ball-ink); }
+.gtag.b { background: var(--court); color: #fff; }
+.chip .gl { font-family: var(--display); font-weight: 700; font-size: 12px; opacity: .75; }
+.cgrade { font-family: var(--display); font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 6px; margin-left: 6px; vertical-align: 3px; }
+.cgrade.a { background: var(--ball); color: var(--ball-ink); }
+.cgrade.b { background: var(--court); color: #fff; }
+.cgrade.mix { background: rgba(255,255,255,.18); color: var(--apron-ink); }
+.bench-h { font-size: 13px; margin-top: 14px; display: flex; align-items: center; gap: 6px; }
 .log { display: grid; }
 .lrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); align-items: center; }
 .lrow:first-child { border-top: 0; }
@@ -349,7 +358,7 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
 
   function blank() {
     return { v: 1, updatedAt: 0, by: "", demo: false, startedAt: Date.now(),
-      settings: { courts: 6, mode: "mix", scores: false, autoFill: true, aCut: 70 },
+      settings: { courts: 6, mode: "mix", scores: false, autoFill: true, aCut: 70, matchups: "mixed", aCourts: 2 },
       roster: [], courts: [null, null, null, null, null, null], matches: [] };
   }
   function normalize(s) {
@@ -442,11 +451,28 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
     }
     return best;
   }
+  const gradeOfPlayer = p => (p.grade === "A" ? "A" : "B");
+  const courtGrade = i => (i < state.settings.aCourts ? "A" : "B");
+  // Choose the next game for court i, following the matchups setting.
+  // Grades never leave a court idle: if a grade is short of 4 players, the game is mixed.
+  function chooseGame(S, list, i) {
+    const m = state.settings.matchups;
+    const of = g => list.filter(p => gradeOfPlayer(p) === g);
+    let pick = null, grade = null;
+    if (m === "courts") {
+      grade = courtGrade(i); pick = pickGame(S, of(grade));
+    } else if (m === "grade" && list.length) {
+      grade = gradeOfPlayer(list[0]); pick = pickGame(S, of(grade));
+      if (!pick) { grade = grade === "A" ? "B" : "A"; pick = pickGame(S, of(grade)); }
+    }
+    if (!pick) { pick = pickGame(S, list); grade = m === "mixed" ? null : "mix"; }
+    return pick ? { ...pick, grade } : null;
+  }
   function placeGame(s, i) {
     const S = computeStats();
-    const pick = pickGame(S, waitingList(S, onCourtMap()));
+    const pick = chooseGame(S, waitingList(S, onCourtMap()), i);
     if (!pick) return false;
-    s.courts[i] = { id: uid(), a: pick.a, b: pick.b, startedAt: Date.now() };
+    s.courts[i] = { id: uid(), a: pick.a, b: pick.b, grade: pick.grade, startedAt: Date.now() };
     return true;
   }
 
@@ -645,8 +671,13 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
       return;
     }
     const open = state.courts.filter(c => !c).length;
-    const next = pickGame(S, wait);
-    const nextIds = new Set(next ? [...next.a, ...next.b] : []);
+    const graded = state.settings.matchups !== "mixed";
+    const firstOpen = state.courts.findIndex(c => !c);
+    const next = chooseGame(S, wait, firstOpen < 0 ? 0 : firstOpen);
+    const nextIds = new Set();
+    if (graded) ["A", "B"].forEach(g => { const pk = pickGame(S, wait.filter(p => gradeOfPlayer(p) === g)); if (pk) [...pk.a, ...pk.b].forEach(id => nextIds.add(id)); });
+    else if (next) [...next.a, ...next.b].forEach(id => nextIds.add(id));
+    const gradeTag = g => g ? `<span class="cgrade ${g === "mix" ? "mix" : g.toLowerCase()}">${g === "mix" ? "Mixed" : g + " game"}</span>` : "";
     let h = `<div class="courts-bar">
       <div class="summary"><b>${state.courts.length - open}</b> playing · <b>${open}</b> open · <b>${wait.length}</b> waiting</div>
       <div class="row">
@@ -657,7 +688,7 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
         const mins = (Date.now() - c.startedAt) / 60000;
         const names = ids => ids.map(id => { const p = state.roster.find(x => x.id === id); const out = p && (!p.in || p.paused); return `<span class="pn${out ? " out" : ""}" title="${out ? "Leaving after this game" : ""}">${esc(nameOf(id))}</span>`; }).join("");
         h += `<article class="ccard" aria-label="Court ${i + 1}">
-          <div class="chead"><span class="cno">Court ${i + 1}</span><span class="ctime${mins >= 20 ? " long" : ""}" data-start="${c.startedAt}">${elapsed(c.startedAt)}</span></div>
+          <div class="chead"><span class="cno">Court ${i + 1}${graded ? gradeTag(c.grade) : ""}</span><span class="ctime${mins >= 20 ? " long" : ""}" data-start="${c.startedAt}">${elapsed(c.startedAt)}</span></div>
           <div class="court">
             <button class="side a" data-act="court" data-i="${i}" data-w="a" aria-label="Record result for court ${i + 1}" ${readOnly ? "disabled" : ""}>${names(c.a)}</button>
             <div class="net" aria-hidden="true"></div>
@@ -667,11 +698,11 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
         </article>`;
       } else {
         h += `<article class="ccard" aria-label="Court ${i + 1}">
-          <div class="chead"><span class="cno">Court ${i + 1}</span><span class="ctime">Open</span></div>
+          <div class="chead"><span class="cno">Court ${i + 1}${state.settings.matchups === "courts" ? `<span class="cgrade ${courtGrade(i).toLowerCase()}">${courtGrade(i)} court</span>` : ""}</span><span class="ctime">Open</span></div>
           <div class="court empty"><div class="empty-in">
             <span class="lbl">Court open</span>
-            ${next ? `<span class="next">Next up: ${esc(teamName(next.a))} v ${esc(teamName(next.b))}</span>` : `<span class="next">Waiting for 4 players</span>`}
-            ${readOnly ? "" : `<button class="btn primary sm" data-act="fill" data-i="${i}" ${next ? "" : "disabled"}>Start game</button>`}
+            ${(() => { const nx = chooseGame(S, wait, i); return nx ? `<span class="next">Next up: ${esc(teamName(nx.a))} v ${esc(teamName(nx.b))}</span>` : `<span class="next">Waiting for 4 players</span>`; })()}
+            ${readOnly ? "" : `<button class="btn primary sm" data-act="fill" data-i="${i}" ${wait.length >= 4 ? "" : "disabled"}>Start game</button>`}
           </div></div>
           <div class="cfoot"><span>&nbsp;</span></div>
         </article>`;
@@ -680,8 +711,13 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
     h += `</div>`;
     const paused = state.roster.filter(p => p.in && p.paused && !on.has(p.id));
     h += `<div class="card bench">
-      <div class="spread"><h2 class="eyebrow">Bench · ${wait.length}</h2><span class="hint">Fewest games plays next. Highlighted players are up next. Tap a name to send them on a break.</span></div>
-      <div class="chips">${wait.map((p, k) => `<button class="chip${nextIds.has(p.id) ? " next" : ""}" data-act="pause" data-id="${p.id}" title="Send on a break"><span class="k">${k + 1}</span>${esc(p.name)}<span class="g">${S.get(p.id).games}g</span></button>`).join("") || `<span class="hint">Nobody waiting. Everyone checked in is on court.</span>`}</div>
+      <div class="spread"><h2 class="eyebrow">Bench · ${wait.length}</h2><span class="hint">Fewest games plays next. Highlighted players are up next${graded ? " in their grade" : ""}. Tap a name to send them on a break.</span></div>
+      ${(() => {
+        const chip = (p, k) => `<button class="chip${nextIds.has(p.id) ? " next" : ""}" data-act="pause" data-id="${p.id}" title="Send on a break"><span class="k">${k + 1}</span>${esc(p.name)}<span class="g">${S.get(p.id).games}g</span></button>`;
+        if (!wait.length) return `<div class="chips"><span class="hint">Nobody waiting. Everyone checked in is on court.</span></div>`;
+        if (!graded) return `<div class="chips">${wait.map(chip).join("")}</div>`;
+        return ["A", "B"].map(g => { const list = wait.filter(p => gradeOfPlayer(p) === g); return `<h3 class="eyebrow bench-h"><span class="gbadge ${g.toLowerCase()}" style="width:22px;height:22px;font-size:14px" aria-hidden="true">${g}</span>${g} grade waiting · ${list.length}</h3><div class="chips">${list.map(chip).join("") || `<span class="hint">Nobody waiting.</span>`}</div>`; }).join("");
+      })()}
       ${paused.length ? `<div class="spread" style="margin-top:14px"><h3 class="eyebrow" style="font-size:13px">On a break · ${paused.length}</h3><span class="hint">Tap to bring back</span></div>
       <div class="chips">${paused.map(p => `<button class="chip paused" data-act="pause" data-id="${p.id}">${esc(p.name)}<span class="g">${S.get(p.id).games}g</span></button>`).join("")}</div>` : ""}
     </div>`;
@@ -703,7 +739,7 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
       else status = "Waiting";
       return `<div class="prow${p.in ? "" : " off"}">
         <button class="check" data-act="toggleIn" data-id="${p.id}" aria-pressed="${p.in}" aria-label="${p.in ? "Check out" : "Check in"} ${esc(p.name)}"></button>
-        <div style="min-width:0"><div class="pname">${esc(p.name)}</div><div class="pstat">${status}${s.games ? ` · ${s.wins}W ${s.losses}L` : ""}</div></div>
+        <div style="min-width:0;display:flex;gap:10px;align-items:center"><button class="gtag ${gradeOfPlayer(p).toLowerCase()}" data-act="grade" data-id="${p.id}" aria-label="${esc(p.name)} is ${gradeOfPlayer(p)} grade. Tap to change.">${gradeOfPlayer(p)}</button><div style="min-width:0"><div class="pname">${esc(p.name)}</div><div class="pstat">${status}${s.games ? ` · ${s.wins}W ${s.losses}L` : ""}</div></div></div>
         <div class="pact">
           ${p.in ? `<button class="btn sm ghost" data-act="pause" data-id="${p.id}">${p.paused ? "Back in" : "Break"}</button>` : ""}
           <button class="btn sm ghost" data-act="removeAsk" data-id="${p.id}" aria-label="Remove ${esc(p.name)}">Remove</button>
@@ -714,6 +750,11 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
       <div class="setting" style="margin-top:6px"><div class="spread"><b>Courts booked</b>
         <div class="stepper"><button class="btn sm" data-act="courts" data-d="-1" aria-label="Fewer courts">−</button><output>${st.courts}</output><button class="btn sm" data-act="courts" data-d="1" aria-label="More courts">+</button></div></div>
         <p class="hint">${st.courts * 4} players on court at once.</p></div>
+      <div class="setting"><b>Matchups</b>
+        <div class="seg" role="group" aria-label="Matchups"><button data-act="matchups" data-m="mixed" aria-pressed="${st.matchups === "mixed"}">Mixed</button><button data-act="matchups" data-m="grade" aria-pressed="${st.matchups === "grade"}">Same grade</button><button data-act="matchups" data-m="courts" aria-pressed="${st.matchups === "courts"}">A &amp; B courts</button></div>
+        ${st.matchups === "courts" ? `<div class="spread" style="margin-top:6px"><span>A courts</span><div class="stepper"><button class="btn sm" data-act="aCourts" data-d="-1" aria-label="Fewer A courts">−</button><output>${st.aCourts}</output><button class="btn sm" data-act="aCourts" data-d="1" aria-label="More A courts">+</button></div></div>` : ""}
+        <p class="hint">${st.matchups === "mixed" ? "Grades are ignored. Everyone rotates together." : st.matchups === "grade" ? "Each game is four A players or four B players, on whichever court opens. If a grade is short, the game is mixed so nobody waits too long." : `Courts 1–${st.aCourts} are A courts and the rest are B courts. If a grade is short of 4 players, that court plays a mixed game.`} Tap the A/B tag next to a name to change their grade.</p>
+        <button class="btn sm" data-act="ladderGradesAsk" style="justify-self:start">Set grades from the ladder</button></div>
       <div class="setting"><b>Pairing</b>
         <div class="seg" role="group" aria-label="Pairing"><button data-act="mode" data-m="mix" aria-pressed="${st.mode === "mix"}">Mix it up</button><button data-act="mode" data-m="balanced" aria-pressed="${st.mode === "balanced"}">Even teams</button></div>
         <p class="hint">${st.mode === "mix" ? "Avoids repeating partners and opponents so everyone plays with everyone." : "Pairs strong with weaker players by win rate so games are close. Still avoids repeat partners."}</p></div>
@@ -995,10 +1036,23 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
       case "courts": {
         const n = Math.max(1, Math.min(12, state.settings.courts + +t.dataset.d));
         if (n < state.courts.length && state.courts.slice(n).some(Boolean)) { toast(`Finish or cancel the game on Court ${state.courts.length} first`); break; }
-        commit(s => { s.settings.courts = n; while (s.courts.length < n) s.courts.push(null); s.courts.length = n; });
+        commit(s => { s.settings.courts = n; s.settings.aCourts = Math.max(1, Math.min(s.settings.aCourts, n - 1)); while (s.courts.length < n) s.courts.push(null); s.courts.length = n; });
         break;
       }
       case "mode": commit(s => { s.settings.mode = t.dataset.m; }); break;
+      case "matchups": commit(s => { s.settings.matchups = t.dataset.m; s.settings.aCourts = Math.max(1, Math.min(s.settings.courts - 1 || 1, s.settings.aCourts)); }); break;
+      case "aCourts": commit(s => { s.settings.aCourts = Math.max(1, Math.min(Math.max(1, s.settings.courts - 1), s.settings.aCourts + +t.dataset.d)); }); break;
+      case "grade": commit(s => { const q = s.roster.find(x => x.id === id); q.grade = gradeOfPlayer(q) === "A" ? "B" : "A"; }); break;
+      case "ladderGradesAsk": {
+        const rows = ladderRows(ladderNights());
+        if (!rows.length) { toast("No ladder yet. Save a session in Wrap-up first."); break; }
+        const byName = new Map(rows.map(r => [r.name.trim().toLowerCase(), gradeOf(r.wins, r.games)]));
+        const changes = state.roster.filter(p => byName.has(p.name.trim().toLowerCase()) && byName.get(p.name.trim().toLowerCase()) !== gradeOfPlayer(p));
+        if (!changes.length) { toast("Everyone's grade already matches the ladder"); break; }
+        confirmSheet("Set grades from the ladder?", `${changes.length} player${changes.length === 1 ? "" : "s"} will change grade, based on the last ${LADDER_NIGHTS} sessions (${state.settings.aCut}%+ win rate is A). Players with no ladder games keep their grade.`, "Update grades",
+          () => commit(s => s.roster.forEach(p => { const k = p.name.trim().toLowerCase(); if (byName.has(k)) p.grade = byName.get(k); })), false);
+        break;
+      }
       case "autoFill": commit(s => { s.settings.autoFill = !s.settings.autoFill; }); break;
       case "scores": commit(s => { s.settings.scores = !s.settings.scores; }); break;
       case "aCut": commit(s => { s.settings.aCut = Math.max(50, Math.min(95, s.settings.aCut + +t.dataset.d)); }); break;
