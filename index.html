@@ -1,4 +1,9 @@
 <!doctype html>
+<!--
+  Happy Bees Pickleball
+  © 2026 Beamin. All rights reserved.
+  No part of this code, design or graphics may be copied, modified or reused without written permission from Beamin.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -245,6 +250,7 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
 .toast button[hidden] { display: none; }
 @media (prefers-reduced-motion: no-preference) { .toast { animation: rise .2s ease-out; } @keyframes rise { from { transform: translate(-50%, 8px); opacity: 0; } } }
 .credit { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); text-align: center; color: var(--muted); font-size: 12px; }
+.credit .rights { margin-top: 6px; font-size: 11px; }
 .credit b { font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); margin-left: 4px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
@@ -312,7 +318,7 @@ pre.copy { white-space: pre-wrap; background: var(--surface-2); border: 1px soli
     <section id="v-standings" hidden></section>
     <section id="v-wrap" hidden></section>
   </main>
-  <footer class="credit">Built by<b>Beamin</b></footer>
+  <footer class="credit"><div>Built by<b>Beamin</b></div><div class="rights">© 2026 Beamin. All rights reserved.</div></footer>
 </div>
 
 <div class="backdrop" id="backdrop" hidden>
